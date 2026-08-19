@@ -21,8 +21,8 @@ detector scheduling at the edge: a **measured energy anchor** on a Jetson Orin N
 | `gates/` | The **S / RF / DQN** gate implementations (`asmag-rl-vs-deterministic`): score-gate, random-forest CALIB gate, and DQN reinforcement-learning gate, with trained models. Produces the measured anchors. See `gates/README.md`. |
 | `evaluation/` | Analysis scripts + pre-computed result JSONs for the detection-grounded anchors consumed by `theory/awp_experiments.py`. See `evaluation/README.md`. |
 | `results/` | Output CSVs and metrics JSON (synthetic sweep, real-data run, per-category, general frontier). |
-| `figures/` | Figures used in the paper (fig1–6, schematics). |
-| `paper/` | Manuscript source (`paper.tex`, `IEEEtran.cls`) and typeset `paper.pdf`. *Will be refreshed to the TPDS submission version (12 pp, single-column redrawn figures) when the submission package is finalized.* |
+| `figures/` | Figures of the submitted paper: `fig1`, `fig3`, `fig5`, `fig24` (merged noise/adversarial panel) and the schematics `sch2`, `sch5`. `fig2`, `fig4`, `fig6` are the pre-merge originals, still produced by the scripts in `theory/`; `fig6` ships as supplementary material with the paper. |
+| `paper/` | Manuscript source (`paper.tex`, `IEEEtran.cls`) and typeset `paper.pdf` — the TPDS submission version (12 pp, single-column redrawn figures), identical to the submitted package. |
 
 ## Quick start
 ```bash
