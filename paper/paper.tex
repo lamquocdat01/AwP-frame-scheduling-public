@@ -1,0 +1,530 @@
+\documentclass[10pt,journal,compsoc]{IEEEtran}
+\usepackage{amsmath,amssymb,amsthm,graphicx,booktabs,url,xcolor}
+\usepackage[hidelinks]{hyperref}
+\newtheorem*{lem}{Lemma 1}
+\newtheorem*{thmone}{Theorem 1}
+\newtheorem*{thmonep}{Theorem 1$'$}
+\newtheorem*{thmtwo}{Theorem 2}
+\newtheorem*{thmthree}{Theorem 3}
+\newtheorem*{propfour}{Proposition 4}
+\newtheorem*{propfive}{Proposition 5}
+\newtheorem*{cor}{Corollary}
+\newtheorem*{defn}{Definition}
+\newtheorem*{rem}{Remark}
+\newcommand{\bbeta}{\beta}
+\begin{document}
+\title{Learning-Augmented Frame Scheduling:\\ Consistency--Robustness Bounds for Gating\\ with Untrusted Motion Predictors}
+\author{Lam~Quoc~Dat%
+\IEEEcompsocitemizethanks{\IEEEcompsocthanksitem L. Q. Dat is with the School of Business and Technology (FSB), FPT University, Ho Chi Minh City, Vietnam.\protect\\ E-mail: lamquocdat@gmail.com.\protect\\ ORCID: 0009-0004-5432-9343.}%
+\thanks{Manuscript submitted July 3, 2026. Single author. The author declares no conflict of interest. This work received no external funding.}}
+\markboth{}{}
+\IEEEtitleabstractindextext{%
+\begin{abstract}
+\rightskip=0pt\relax
+Energy-constrained edge devices must decide \emph{online} which video frames receive an object-detector invocation. The dominant approach is \emph{content-aware gating}: a cheap motion cue concentrates the detector budget on frames likely to contain events. Yet, evaluated across datasets at equal energy, hand-crafted and learned gates are \emph{dominated} by an oblivious periodic schedule. We explain this at the theorem level. Casting gated detection as online sampling with an untrusted predictor in the algorithms-with-predictions framework, we (i) formalize \emph{perception sampling} with windowed detection-recall, a hard activation budget, and a prediction-error metric $\eta$ that is measurable before deployment as one minus the cue's onset-AUC; (ii) prove regime-indexed lower bounds, including an \emph{advice-commitment} bound in which a cue-committed gate contributes zero worst-case recall; and (iii) prove the \emph{general tight} consistency--robustness frontier for the deployed class of \emph{non-adaptive} gates, attained everywhere by SAT-GATE, a saturated-backbone policy, with the simpler HEDGE-GATE optimal when the budget is scarce. A calibrated synthetic sweep and an uncapped 121-video real-data study confirm the theory: a motion cue with onset-AUC $\approx 0.46$ trails the periodic schedule at every budget, and a stronger learned cue does not rescue it. The results convert an empirical negative into a structural impossibility and give designers a certifiable dial between exploiting predictions and guaranteeing worst-case recall.
+\end{abstract}
+\begin{IEEEkeywords}
+\rightskip=0pt\relax
+Edge video analytics, online algorithms, algorithms with predictions, frame scheduling, energy-efficient inference, competitive analysis, consistency--robustness trade-off.
+\end{IEEEkeywords}}
+\maketitle
+\IEEEdisplaynontitleabstractindextext
+\IEEEpeerreviewmaketitle
+
+\section{Introduction}
+\IEEEPARstart{M}{odern} edge video-analytics pipelines operate under a hard energy budget: invoking a deep object detector on every frame is infeasible on a battery- or thermally-limited device, so a scheduler must select a subset of frames on which to spend detector invocations. The dominant design philosophy is \emph{content-awareness}---use a cheap signal (a frame-difference score, a motion-density statistic, or a learned policy) to predict which frames are likely to matter, and concentrate the detector budget there. The promise is intuitive: why sample blind when you can sample smart?
+
+A recent detection-grounded, multi-regime, multi-protocol evaluation challenged this intuition. Across CDnet2014, LASIESTA, BMC, and VIRAT (121 videos, 3{,}713 events), with video-level bootstrap ($B=1000$), content-aware and learned gates provided \emph{no} deployable advantage over an oblivious periodic schedule at equal energy. The failure concentrates exactly where deployment lives: at activation $a=0.20$, a hand-crafted score-gate recovers $28.4\%$ and a learned random-forest gate $20.0\%$ of events, while the periodic schedule recovers $98.4\%$; a reinforcement-learning gate cannot even reach low activation. Worse, leave-one-dataset-out (LODO) evaluation \emph{reverses} the within-dataset ranking entirely (a rank correlation flip from $+1$ to $-1$ on pooled policies), exposing the within-dataset wins as evaluation artifacts.
+
+These findings are empirical. The natural scientific question---and the one a skeptical reviewer will ask---is \emph{why} adaptivity fails, and whether it \emph{must}. This paper answers with matching upper and lower bounds in the algorithms-with-predictions (AwP) framework~\cite{lv,purohit,mv}. Our thesis is that the gate is not a good idea badly executed; it is an \emph{online algorithm trusting an untrusted predictor}, and its observed collapse is the robustness arm of a provable consistency--robustness trade-off. Reframing the engineering question as a question about online algorithms lets us state precisely how much an adaptive gate can gain when the cue is good, how much it can lose when the cue is adversarial, and where the boundary between the two regimes lies.
+
+The stakes are practical. Always-on cameras for safety, wildlife, and industrial monitoring run for months on battery or harvested power, where a detector invocation is the dominant energy cost; a scheduler that wrongly skips event frames silently loses the very incidents the system exists to capture. The failure is moreover \emph{evaluation-hidden}: it surfaces only under cross-scene deployment, after the within-dataset benchmark has already endorsed the gate. A theory of \emph{when} adaptivity can and cannot help is therefore not academic---it tells a deployer whether to ship a learned gate or a one-line periodic loop.
+
+At a high level the argument has three moves: \emph{(i)} a cheap oblivious schedule already guarantees recall $\beta$ (Lemma~1); \emph{(ii)} a cue-committed gate can be driven below $\beta$, even to zero, by adversarial advice (Theorems~1 and~1$'$); and \emph{(iii)} the best one can do while keeping a guarantee traces a tight frontier $r^\star(c)$ that a saturated-backbone gate (SAT-GATE) attains in every budget regime, while the simple budget-split HEDGE-GATE is optimal when the budget is scarce (Theorems~2--3). The empirical study then shows that deployed cues live exactly in the regime where step (ii) bites.
+
+\noindent\textbf{Contributions.} (1) A formal model of gated perception sampling with windowed detection-recall and hard activation budgets, together with a prediction-error metric $\eta$ on motion cues that is computable from deployment logs (\S\ref{sec:model}). (2) A \emph{regime-indexed} lower bound: a coverage bound (Theorem~1) for the dense regime and a new \emph{advice-commitment} bound (Theorem~1$'$) for the high-budget regime $a\ge 1/(W{+}1)$, where the former is vacuous; the latter shows that a gate that commits its budget to the cue contributes \emph{zero} worst-case recall---the first impossibility result for content-aware sampling (\S\ref{sec:lb}). (3) The \emph{general tight} consistency--robustness frontier $r^\star(c)$ for the deployed class of \emph{non-adaptive} gates across all budget regimes, and SAT-GATE, a saturated-backbone policy proven Pareto-optimal everywhere; the simpler HEDGE-GATE is Pareto-optimal in the scarce-budget regime and endpoint-optimal otherwise (Theorems~2--3, \S\ref{sec:frontier}). (4) HEDGE-GATE and SAT-GATE as certifiable dials that degrade affinely in $\eta$ (Proposition~4), giving operators a tunable trade-off between exploiting the cue and guaranteeing worst-case recall (\S\ref{sec:hedge}). (5) Empirical grounding via measured detection anchors, a calibrated synthetic corruption sweep, and a real-data run over a 121-video corpus (\S\ref{sec:eval}).
+
+\noindent\textbf{Organization.} \S\ref{sec:related} surveys related work; \S\ref{sec:model} gives the model and a periodic-coverage lemma; \S\ref{sec:lb} proves the lower bounds; \S\ref{sec:frontier} proves the tight frontier; \S\ref{sec:hedge} presents HEDGE-GATE and its smoothness; \S\ref{sec:eval} reports the empirical study; \S\ref{sec:disc} discusses scope, limitations, and the feedback-aware extension; \S\ref{sec:conc} concludes. Proofs not in the main text appear in the Appendix.
+
+\section{Related Work}\label{sec:related}
+\textbf{Algorithms with predictions (AwP).} Lykouris and Vassilvitskii initiated competitive analysis with machine-learned advice for caching~\cite{lv}; Purohit, Svitkina, and Kumar formalized the consistency--robustness trade-off for ski-rental and non-clairvoyant scheduling~\cite{purohit}; Mitzenmacher and Vassilvitskii survey the area~\cite{mv}. The framework now spans caching~\cite{rohatgi,wei}, the primal--dual method~\cite{bamas}, secretary/matching~\cite{antoniadis}, online scheduling~\cite{lattanzi}, online knapsack~\cite{im}, metrical task systems~\cite{christianson}, and online conversion~\cite{sun}, and it has been hardened against \emph{untrusted} predictions~\cite{angelopoulos,antoniadisM} and \emph{multiple} predictions~\cite{anand2}, within the broader learning-augmented-systems agenda~\cite{kraska,anand,mbloom}. Two desiderata recur---\emph{consistency} (near-optimal when the prediction is accurate) and \emph{robustness} (a worst-case guarantee when it is arbitrary)---and several works pin down \emph{Pareto-optimal} consistency--robustness curves~\cite{sun,christianson}. Yet every one of these targets a \emph{cost-minimization} objective with soft or amortized budgets and treats the predictor as an abstract oracle of unmeasured reliability. None addresses \emph{perception sampling}, where the objective is windowed event \emph{recall} to be maximized, the budget is a \emph{hard} activation cap, and advice quality is \emph{scene-varying and measurable}---the object for which we give matching upper and lower bounds.
+
+\textbf{Content-aware video analytics and edge inference.} A large systems literature cuts the cost of running detectors on video: frame/feature filtering (NoScope~\cite{noscope}, Focus~\cite{focus}, FilterForward~\cite{filterforward}), cheap-cue skipping and configuration adaptation (Glimpse~\cite{glimpse}, Chameleon~\cite{chameleon}, Reducto~\cite{reducto}), quality/bandwidth adaptation and server-driven streaming (AWStream~\cite{awstream}, DDS~\cite{dds}), and device--cloud splitting or cluster-scale serving (Neurosurgeon~\cite{neurosurgeon}, SPINN~\cite{spinn}, Nexus~\cite{nexus}, Clockwork~\cite{clockwork}). These systems deliver large empirical savings but are almost universally evaluated \emph{within-dataset} and give \emph{no worst-case guarantee} on event recall under a hard energy budget. A detection-grounded, equal-energy, cross-dataset evaluation (\S\ref{sec:eval}) shows the reported gains are largely protocol artifacts: the within-dataset ranking inverts under leave-one-dataset-out. Our theory explains \emph{why}: frame-level gating is advice about \emph{timing}---high-dimensional and adversarially fragile---whereas rate (refresh-period) selection is low-dimensional and slowly varying.
+
+\textbf{Sampling and freshness.} Age-of-Information characterizes optimal status-update schedules for freshness~\cite{aoi}; quickest change detection with observation control bounds detection delay under sampling constraints~\cite{qcd}. These supply oblivious-schedule baselines and windowed-staleness semantics, which we import into the AwP setting; neither models an untrusted predictor.
+
+\textbf{Research gap and positioning.} The two literatures leave a precise hole. AwP theory gives tight consistency--robustness results, but only for cost-minimization objectives with soft budgets, and treats the predictor as an abstract oracle of unmeasured reliability. Video-analytics systems attack exactly the perception-sampling objective---catch each event once, cheaply---but purely empirically, with no impossibility result explaining when a cue \emph{cannot} help and no certifiable recall floor. Neither side connects predictor reliability to a quantity an engineer can measure \emph{before} deployment. We close the gap on all three fronts: (i) we formalize perception sampling (windowed recall, hard budget) and prove matching lower bounds plus a \emph{general tight} consistency--robustness frontier for the deployed non-adaptive class; (ii) we make the predictor error $\eta$ \emph{measurable} as one minus the cue's onset-AUC, tying the frontier to a pre-deployment statistic; and (iii) we turn the theory into deployable dials (HEDGE-GATE, SAT-GATE) with a certifiable worst-case floor. To our knowledge this is the first work to give matching upper and lower bounds for content-aware sampling.
+
+\section{Model and Preliminaries}\label{sec:model}
+\textbf{Events and schedules.} Time is slotted, $t=1,\dots,T$ (one slot per frame). An unknown event process marks onsets $o_1<\dots<o_m$. A \emph{schedule} $\sigma\subseteq[T]$ is the set of frames on which the detector runs; its \emph{activation} is $a(\sigma)=|\sigma|/T$, constrained by a hard budget $|\sigma|\le B=\lfloor aT\rfloor$. The detector is assumed reliable when invoked on an event-bearing frame. An event $j$ is \emph{recalled} if some fire lands within the staleness window $W$ of its onset, i.e.\ $\sigma\cap[o_j,o_j{+}W]\neq\varnothing$; throughout, $W=7$ as in the detection-grounded protocol of \S\ref{sec:eval}. The objective is \emph{windowed recall} $R(\sigma)=\tfrac1m\sum_{j=1}^m \mathbf 1[\sigma\cap[o_j,o_j{+}W]\neq\varnothing]$. We write $K=\lceil 1/a\rceil$ and $\beta:=\min\!\big(1,(W{+}1)/K\big)$. The offline oracle that knows all onsets achieves $R=1$ whenever $B\ge m$.
+
+\textbf{Cue, predictor, and prediction error.} A gate observes a per-frame \emph{cue} $x_t$ (e.g.\ motion density) and fires when a score $q(x_t)$ exceeds a budget-tuned threshold. The cue induces a predictor $\hat\pi$; the per-event error is $\eta_j=\mathbf 1[\hat\pi$ fails to cover $e_j$ at budget $a]$ and $\eta=\mathbb E[\eta_j]\in[0,1]$. Crucially, $\eta$ is \emph{estimable from deployment logs} as $\eta=1-\mathrm{AUC}_{\text{onset}}$, one minus the onset-coverage area-under-curve of the cue. In our benchmark $\mathrm{AUC}_{\text{onset}}\in[0.49,0.79]$; our real-data measurement (\S\ref{sec:eval}) is $0.46$.
+
+\begin{rem}[Why onset-windowed recall]
+We score a schedule by whether it fires within $W$ of each \emph{onset}, not by total frames-on-event. This matches detection-grounded deployment: catching an event once, promptly, is what triggers the downstream action (an alert, a track, a recording); dwelling on a long event yields no extra value and would double-count long events. It also makes the periodic certificate of Lemma~1 exact and the error metric $\eta$ a property of \emph{onsets}, where cues are weakest.
+\end{rem}
+
+\begin{defn}[Non-adaptive gate]
+A (randomized) gate is \emph{non-adaptive} if its fired set $\sigma$ is a function of the cue stream and the gate's internal randomness only---not of detector hit/miss feedback. Threshold score-gates, random-forest gates, and HEDGE-GATE are non-adaptive.
+\end{defn}
+
+\textbf{Consistency and robustness.} For a gate $G$ we write $c=\mathbb E[R(G)\mid \eta{=}0]$ (\emph{consistency}: recall when the cue is perfect, normalized to the oracle) and $r=\mathbb E[R(G)\mid\eta{=}1]$ (\emph{robustness}: recall when the cue is adversarial). A useful worst-case family makes these quantities sharp.
+
+\begin{defn}[Canonical block family]
+Partition $[T]$ into $N=\lfloor T/(W{+}1)\rfloor$ disjoint blocks of length $W{+}1$; an event occupies the first slot of an ``event block''. With $K>W{+}1$ we have $B<N$. The cue marks a fixed \emph{advised} set $A$ of $B$ blocks. Two instances share the \emph{same} cue: at $\eta{=}0$ the event blocks are exactly $A$; at $\eta{=}1$ they are $B$ \emph{non-advised} blocks. Note $B/N=a(W{+}1)=(W{+}1)/K=\beta$.
+\end{defn}
+
+\begin{table}[t]
+\centering\caption{Notation.}\label{tab:notation}
+\small
+\begin{tabular}{@{}l@{\ \ }l@{}}
+\toprule
+Symbol & Meaning\\
+\midrule
+$T,\,t$ & horizon; frame index\\
+$o_j,\,m$ & onset of event $j$; number of events\\
+$W$ & staleness window; recall if fire in $[o_j,o_j{+}W]$\\
+$a,\,B$ & activation budget; $B=\lfloor aT\rfloor$ fires\\
+$K$ & $\lceil 1/a\rceil$ (periodic stride)\\
+$\beta$ & $\min(1,(W{+}1)/K)$ (oblivious coverage rate)\\
+$\eta$ & prediction error $=1-\mathrm{AUC}_{\text{onset}}\in[0,1]$\\
+$c,\,r$ & consistency ($\eta{=}0$) and robustness ($\eta{=}1$) recall\\
+$\lambda$ & HEDGE-GATE trust dial (oblivious budget fraction)\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{lem}[Periodic coverage certificate]
+\emph{(a)} If $K\le W{+}1$, the deterministic periodic schedule (fire every $K$-th frame) recalls every event ($R=1$) on all instances. \emph{(b)} If $K>W{+}1$, the random-phase periodic schedule (phase $U$ uniform on $\{0,\dots,K{-}1\}$) recalls each event with probability $(W{+}1)/K$. Hence $\mathbb E[R]\ge\beta$.
+\end{lem}
+\begin{proof}
+(a) Consecutive fires are exactly $K\le W{+}1$ apart, so every length-$(W{+}1)$ window contains a fire. (b) Fires lie on $\{U+jK\}$; for fixed $o$, the window $[o,o{+}W]$ contains a fire iff $(o-U)\bmod K\in\{0,\dots,W\}$, which holds for exactly $W{+}1$ of the $K$ equally likely residues, i.e.\ with probability $(W{+}1)/K$. Linearity of expectation over the $m$ events gives $\mathbb E[R]=(W{+}1)/K$.
+\end{proof}
+
+\begin{figure}[t]\centering
+\includegraphics[width=0.95\columnwidth]{sch1.png}
+\caption{Windowed recall and the periodic certificate (Lemma~1). Green band: staleness window $[o,o{+}W]$; $\blacktriangledown$: onset; vertical line: a detector fire. Top: $K\le W{+}1$ guarantees a fire in every window ($R{=}1$). Bottom: $K>W{+}1$ meets a window only a $(W{+}1)/K$ fraction of placements.}
+\label{fig:model}
+\end{figure}
+
+\noindent\emph{Worked example (recall accounting).} Take $T{=}24$, $W{=}2$ (window length $3$). With $a{=}1/3$, $K{=}3\le3$ and fires at $t{=}0,3,6,\dots$ meet every window, so $R{=}1$. With $a{=}1/6$, $K{=}6>3$ and a length-$3$ window meets a fire in only $3/6$ of phases, so $\mathbb E[R]=(W{+}1)/K=0.5$, exactly $\beta$. Thus $\beta$ is the recall available ``for free'' from an oblivious rhythm.
+
+\section{Lower Bounds}\label{sec:lb}
+We give two lower bounds indexed by the budget regime. The first is a coverage bound that is informative when the budget is small ($K>W{+}1$); the second is an advice-commitment bound that remains informative in the high-budget regime $a\ge 1/(W{+}1)$ (i.e.\ $K\le W{+}1$), where the first becomes vacuous.
+
+\subsection{Coverage bound (dense regime)}
+\begin{thmone}[Coverage]
+Fix budget $a=1/K$ and $W<K$. Any online gate $G$ that allocates at least a $(1-\delta)$ fraction of its budget according to an advice stream of error $\eta$ satisfies, on some event process consistent with $\eta$,
+\begin{equation}
+R(G)\;\le\;1-\eta\big(1-\tfrac{W+1}{K}\big)+\delta .
+\end{equation}
+As $\eta\to1$, recall degrades to the level of a schedule that concentrates its budget on the wrong frames.
+\end{thmone}
+\begin{proof}
+Work on the canonical block family with $m=B$ (one event per block; blocks disjoint), and let the advice \emph{mislabel} an $\eta$ fraction of the events---by the definition of $\eta$ it marks a non-event block instead of the event's own block. By hypothesis the gate places at least $(1-\delta)B$ fires on advice-marked blocks, leaving at most $\delta B$ \emph{oblivious} fires. Each of the $\eta B$ mislabeled events lies in a block containing no advice-marked fire, so it can be recalled only by an oblivious fire; since the blocks are disjoint, a single fire lies in at most one block and recalls at most one event, so at most $\delta B$ mislabeled events are recalled. The $(1-\eta)B$ correctly-labeled events contribute at most $(1-\eta)B$. Hence $mR\le(1-\eta)B+\min(\eta,\delta)B$, i.e.\ $R\le(1-\eta)+\delta$. Finally $1-\eta+\delta\le 1-\eta+\eta\tfrac{W+1}{K}+\delta=1-\eta(1-\tfrac{W+1}{K})+\delta$, the claimed bound; the pure-advice case $\delta{=}0$ gives $R\le1-\eta$.
+\end{proof}
+\begin{rem}
+When $a\ge 1/(W{+}1)$, i.e.\ $K\le W{+}1$, the coverage term satisfies $(W{+}1)/K\ge1$, so the right-hand side is $1+\delta$: the bound is \emph{vacuous}. Yet a content-aware gate can be driven to recall $\approx 0$ even here (\S\ref{sec:eval}). The next theorem supplies the missing argument.
+\end{rem}
+
+\subsection{Advice-commitment bound (high-budget regime)}
+\begin{thmonep}[Advice commitment]
+\emph{(i)} Let $G_{\mathrm{adv}}$ fire the top-$B$ frames by cue value (a \emph{pure-advice} gate). In the sparse regime $m(W{+}1)\le T-B$ there is an instance with onset-AUC $\le\tfrac12$ (a non-predictive cue, so $\eta=1$) on which $R(G_{\mathrm{adv}})=0$. \emph{(ii)} \textsc{HEDGE-GATE}$(\lambda)$, which spends $\lambda B$ fires on an oblivious random-phase periodic backbone at rate $\lambda a$ and $(1{-}\lambda)B$ on the advice gate, satisfies $\mathbb E[R]\ge\min(1,\lambda(W{+}1)/K)=\lambda\beta$ on \emph{every} instance and \emph{every} cue. Thus the advice arm contributes zero worst-case recall; a gate can do no better than its oblivious fraction alone.
+\end{thmonep}
+\begin{proof}
+(i) The number of non-window frames is $T-\big|\bigcup_j[o_j,o_j{+}W]\big|\ge T-m(W{+}1)\ge B$ by hypothesis. Assign the $B$ largest cue values to $B$ such non-window frames, forming a set $C$, and set all remaining cue values equal. The cue then ranks no window frame above a non-window frame, so $\mathrm{AUC}_{\text{onset}}\le\tfrac12$ (the cue is non-predictive at onsets) and $\eta=1$. $G_{\mathrm{adv}}$ fires exactly $C$, which is disjoint from every $[o_j,o_j{+}W]$; hence no event is recalled and $R=0$. (ii) The backbone is an oblivious random-phase periodic schedule at rate $\lambda a$, chosen independently of the cue. By Lemma~1(b) it recalls each event with probability $\min(1,\lambda a(W{+}1))=\min(1,\lambda(W{+}1)/K)$. Since the backbone fires regardless of the advice arm, $\mathbb E[R(\textsc{HEDGE-GATE}(\lambda))]\ge\lambda\beta$ for every instance and cue.
+\end{proof}
+\noindent The two bounds are complementary: Theorem~1 binds in the dense regime ($m(W{+}1)\gtrsim T$, no room for clutter), Theorem~1$'$ in the sparse/high-budget regime. Together they certify the empirically observed collapse across the full activation range.
+
+\begin{figure}[t]\centering
+\includegraphics[width=0.95\columnwidth]{sch2.png}
+\caption{Theorem~1$'$. (a) A pure-advice gate spends its whole budget on high-cue ``clutter'' frames disjoint from events, recalling nothing ($R{=}0$). (b) HEDGE-GATE's oblivious backbone (blue) guarantees the floor $\lambda\beta$ regardless of the cue.}
+\label{fig:t1p}
+\end{figure}
+
+\noindent\emph{Worked example (the floor).} Let $T{=}100$, $W{=}2$, $B{=}10$ ($a{=}0.1$), $m{=}5$, so $K{=}10$ and $\beta=\min(1,3/10)=0.3$. Non-window frames number $100-5\cdot3=85\ge10$, so the adversary places the $10$ highest cue values off all windows; the pure-advice gate fires them and recalls $0$ events. HEDGE-GATE with $\lambda{=}0.5$ instead spends $5$ fires on a rate-$0.05$ backbone, recalling each event with probability $\min(1,0.05\cdot3)=0.15$; thus $\mathbb E[R]\ge\lambda\beta=0.15$ however adversarial the cue.
+
+\section{The Tight Consistency--Robustness Frontier}\label{sec:frontier}
+We now characterize \emph{exactly} the achievable $(c,r)$ region for the deployed class of non-adaptive gates, and show HEDGE-GATE is Pareto-optimal in that class.
+
+Theorems~1 and~1$'$ bound how badly a gate can do; we now ask the dual question---for a given consistency, exactly how much robustness must be given up? The answer is a single clean line, and it is achievable.
+
+\begin{thmtwo}[Tight frontier, general budget regime]
+Fix the canonical block family with $K>W{+}1$ (so $\beta<1$), and write the budget share $\beta=B/N$. Every non-adaptive randomized gate with consistency $c$ and robustness $r$ satisfies $r\le r^\star(c)$, where
+\begin{equation}\label{eq:frontier}
+r^\star(c)=
+\begin{cases}
+c, & c\le\beta,\\[2pt]
+\dfrac{\beta(1-c)}{1-\beta}, & c\ge\beta,\ \beta\le\tfrac12\quad(\text{scarce budget}),\\[6pt]
+1-\dfrac{(1-\beta)\,c}{\beta}, & c\ge\beta,\ \beta>\tfrac12\quad(\text{high budget}),
+\end{cases}
+\end{equation}
+and the bound is \emph{attained for every $c$} by \textsc{SAT-GATE} (Def.~\ref{def:sat}). In the scarce-budget regime $\beta\le\tfrac12$ the upper branch is the single line $r=\beta(1-c)/(1-\beta)$, so a $(1{+}\varepsilon)$-consistent gate has robustness ratio $\beta/r=\Omega(1/\varepsilon)$ and full consistency $c{=}1$ forces $r{=}0$. In the high-budget regime $\beta>\tfrac12$ the frontier stays \emph{strictly positive} at full consistency: $r^\star(1)=(2\beta-1)/\beta>0$.
+\end{thmtwo}
+
+\begin{defn}[\textsc{SAT-GATE}]\label{def:sat}
+\textsc{SAT-GATE}$(q)$, $q\in[\beta,1]$, fires every block with an oblivious uniform floor $g=\max\!\big(0,(B-mq)/(N-m)\big)$ and additionally raises each of the $m$ advised (top-cue) blocks to firing probability $q\ge g$, exhausting the budget ($mq+(N-m)g=B$ when $g>0$). It is non-adaptive (its firing plan depends only on the cue) and interpolates from the pure oblivious backbone at $q=\beta$ (then $g=\beta$, all blocks equal) to a maximal-floor advice gate at $q=1$.
+\end{defn}
+
+\begin{proof}
+\emph{Converse.} Let $G$ be any non-adaptive gate. Because the cue is \emph{identical} in the $\eta{=}0$ and $\eta{=}1$ instances (it marks the same advised set $A$, $|A|=m$; only the hidden event blocks differ) and the schedule is a function of the cue and $G$'s coins alone, the per-block firing probability $p_b:=\Pr[G\text{ fires in block }b]$ is the \emph{same} in both instances, with $0\le p_b\le1$ and $\sum_b p_b\le B$. At $\eta{=}0$ the events are $A$, so $c=\tfrac1m\sum_{b\in A}p_b$. At $\eta{=}1$ the adversary hides the $m=B$ events on the $m$ blocks of \emph{smallest} $p_b$, so $r=\tfrac1m\big(\text{sum of the }m\text{ smallest }p_b\big)$. Maximising this sum over $\{p_b\}$ subject to $\sum_{b\in A}p_b=mc$, $\sum_b p_b\le B$, $0\le p_b\le1$ is a linear program; since the sum of the $m$ smallest coordinates is Schur-concave, the optimum is attained at the \emph{symmetric} configuration $p_b=c$ for $b\in A$ and $p_b=g:=\min\!\big(1,(B-mc)/(N-m)\big)$ for $b\notin A$ and this optimum is the \emph{symmetric} one by an explicit exchange argument: if two non-advised blocks have $p_i<p_j$, shifting a small mass $\varepsilon$ from $p_j$ to $p_i$ keeps $\sum_b p_b$ and $\sum_{b\in A}p_b$ fixed and never decreases the sum of the $m$ smallest values (it raises the smaller coordinate), so iterating equalises every non-advised block to $g$; likewise, with the advised sum $mc$ fixed, equalising the advised blocks to $c$ maximises the smallest advised value that can fall into the bottom-$m$ set. Two cases:
+\emph{(a) $\beta\le\tfrac12$ (so $N-m\ge m$).} If $c\ge\beta$ then $g\le c$, the $m$ smallest are non-advised, and $r=g=\beta(1-c)/(1-\beta)$; if $c\le\beta$ then $g\ge c$ and the $m$ smallest are the advised blocks, giving $r=c$.
+\emph{(b) $\beta>\tfrac12$ (so $N-m<m$).} The $m$ smallest necessarily include all $N-m$ non-advised blocks (value $g$) and $2m-N$ advised blocks (value $c$): the events cannot all hide. Hence
+\[
+\begin{aligned}
+r&=\frac{(N-m)g+(2m-N)c}{m}\\
+&=\frac{\beta(1-c)+(2\beta-1)c}{\beta}=1-\frac{(1-\beta)c}{\beta}
+\end{aligned}
+\]
+for $c\ge\beta$ (using $g=\beta(1-c)/(1-\beta)$, $m=\beta N$); and $r=c$ for $c\le\beta$. This is \eqref{eq:frontier}.
+
+\emph{Achievability.} \textsc{SAT-GATE}$(q)$ realises exactly the symmetric configuration with $c=q$, so its $(c,r)$ equals $(q,r^\star(q))$ for every $q\in[\beta,1]$; sweeping $q$ traces the entire upper branch, and mixing with the oblivious backbone reaches $c\le\beta$. Thus the bound is tight everywhere.
+\end{proof}
+
+Intuitively, a non-adaptive gate must publish its firing plan in advance: because the cue looks the same whether or not it is trustworthy, the gate cannot tell the two worlds apart and commits identical firing probabilities $p_b$ to each block. Consistency forces it to pile that probability onto the advised blocks; the budget constraint then leaves little for any other block, and the adversary simply parks the events on the least-covered ones. The only firing the adversary cannot dodge is the oblivious backbone---exactly the $\lambda\beta$ that survives.
+
+To make the converse concrete, take $N{=}10$ blocks and $B{=}2$ events, so $\beta=B/N=0.2$, and a gate with consistency $c{=}0.9$. The budget constraint $\sum_b p_b\le B=2$ and $\sum_{b\in A}p_b=cB=1.8$ leave $\sum_{b\notin A}p_b\le0.2$ spread over $N-B=8$ non-advised blocks. The adversary hides the two events on the two smallest of those, whose total is at most $2\cdot(0.2/8)$, giving $r\le0.025$. The frontier predicts $\beta(1-c)/(1-\beta)=0.2\cdot0.1/0.8=0.025$ exactly: a $90\%$-consistent gate can guarantee at most $2.5\%$ recall when the cue is adversarial.
+
+\begin{cor}[Robustness ratio, scarce budget]
+In the scarce-budget regime $\beta\le\tfrac12$, any non-adaptive gate with consistency $c=1-\varepsilon$ has robustness ratio $\beta/r\ge(1-\beta)/\varepsilon=\Omega(1/\varepsilon)$ against the oblivious certificate; driving consistency to optimality ($\varepsilon\to0$) forces the worst-case ratio to diverge. In the high-budget regime $\beta>\tfrac12$ the ratio stays bounded---$\beta/r^\star(1)=\beta^2/(2\beta-1)$---because a large budget cannot be fully evaded.
+\end{cor}
+\begin{proof}
+For $\beta\le\tfrac12$, Theorem~2 gives $r\le\beta(1-c)/(1-\beta)=\beta\varepsilon/(1-\beta)$, hence $\beta/r\ge(1-\beta)/\varepsilon$. For $\beta>\tfrac12$, $r^\star(1)=(2\beta-1)/\beta$ gives the stated bounded ratio.
+\end{proof}
+
+\begin{thmthree}[Pareto-optimality]
+\textsc{SAT-GATE} is Pareto-optimal among non-adaptive randomized gates for \emph{every} budget: its $(c,r)$ meets the frontier \eqref{eq:frontier} with equality for all $c$, so no non-adaptive gate is simultaneously strictly more consistent and strictly more robust. The budget-split \textsc{HEDGE-GATE}$(\lambda)$ (with $c=(1-\lambda)+\lambda\beta$) is Pareto-optimal in the scarce-budget regime $\beta\le\tfrac12$, where it \emph{coincides} with \textsc{SAT-GATE} on the line $r=\beta(1-c)/(1-\beta)$; in the high-budget regime $\beta>\tfrac12$ it is optimal only at the endpoints $\lambda\in\{0,1\}$ (pure advice, pure periodic) and lies strictly inside the frontier in between---by up to $0.19$ recall at $\beta{=}0.8$ (Fig.~\ref{fig:frontier}).
+\end{thmthree}
+\begin{proof}
+\textsc{SAT-GATE} meets the converse of Theorem~2 with equality (Def.~\ref{def:sat}), hence sits on the upper-right boundary of the achievable region; any point strictly dominating it would violate the converse. For \textsc{HEDGE-GATE}: when $\beta\le\tfrac12$ its advice arm contributes zero worst-case robustness (Thm~1$'$), so $(c,r)=((1-\lambda)+\lambda\beta,\ \lambda\beta)$ lies on the frontier line. When $\beta>\tfrac12$ its true robustness \emph{exceeds} $\lambda\beta$---with so much budget the adversary cannot hide all events off the advised blocks, and the spillover is recalled---but it still satisfies $r\le r^\star(c)$ with equality only at $\lambda\in\{0,1\}$; the interior gap is confirmed by direct computation (\texttt{validate\_frontier.py}, Fig.~\ref{fig:frontier}).
+\end{proof}
+
+\begin{rem}[Feedback, adaptivity, and a design implication]\label{rem:feedback}
+The converse uses crucially that $p_b$ is identical across the two instances---true for non-adaptive gates. With per-fire detector feedback an \emph{adaptive} gate can break this: a single probe of an advised block reveals (hit vs.\ miss) whether the advice is good, after which the gate can revert to the oblivious backbone. Such a \emph{test-then-fallback} gate achieves $c\approx1$ \emph{and} $r\approx\beta$ simultaneously when $B>m$, strictly beating the non-adaptive frontier. Hence the impossibility is specific to non-adaptive gates---exactly the deployed class (threshold, random-forest, and HEDGE-GATE)---and it yields a positive design rule: \emph{verify the cue with a few detector probes before committing the budget}. Characterizing the optimal feedback-aware gate is left to future work (\S\ref{sec:disc}).
+\end{rem}
+
+\begin{figure}[t]\centering
+\includegraphics[width=0.95\columnwidth]{sch5.png}
+\caption{Converse of Theorem~2. The firing plan $p_b$ is fixed by the cue (identical across the two instances). Green: advised set $A$ (high $p_b$, for consistency); the adversary hides the $\eta{=}1$ events on the smallest non-advised bars (red), bounding robustness.}
+\label{fig:conv}
+\end{figure}
+
+\noindent\emph{Worked example (reading the frontier).} With $W{=}7$, $a{=}0.1$, $K{=}10$ we have $\beta{=}0.8$, the high-budget regime, so the frontier is $r^\star(c)=1-(1-\beta)c/\beta=1-c/4$. \textsc{SAT-GATE}$(q{=}0.95)$ fires each advised block at $0.95$ and holds every block at a floor $g=(B-mq)/(N-m)$, attaining $(c,r)=(0.95,\,0.7625)$---on the line. Crucially, even at full consistency $c{=}1$ the optimal non-adaptive gate keeps $r^\star(1)=(2\beta-1)/\beta=0.75$: a budget this large cannot be fully evaded, so committing to the cue no longer erases the worst-case guarantee (contrast the scarce-budget line, where $c{=}1\Rightarrow r{=}0$). \textsc{HEDGE-GATE} reaches these endpoints ($\lambda{=}0$ gives $c{=}1,r{=}0.75$; $\lambda{=}1$ gives $c{=}r{=}0.8$) but trails the frontier for intermediate $\lambda$ (Fig.~\ref{fig:frontier}). Table~\ref{tab:beta} shows the trade-off vanishes entirely at $\beta{=}1$ ($a\ge1/(W{+}1)=0.125$).
+
+\begin{table}[t]\centering\caption{Oblivious rate $\beta=\min(1,(W{+}1)/K)$ and HEDGE-GATE robustness floor $\lambda\beta$ ($W{=}7$). The trade-off bites only where $\beta<1$.}\label{tab:beta}
+\small
+\begin{tabular}{ccccc}
+\toprule
+$a$ & $K$ & $\beta$ & floor $\lambda{=}0.5$ & floor $\lambda{=}1$\\
+\midrule
+$0.05$ & $20$ & $0.40$ & $0.20$ & $0.40$\\
+$0.10$ & $10$ & $0.80$ & $0.40$ & $0.80$\\
+$0.125$ & $8$ & $1.00$ & $0.50$ & $1.00$\\
+$0.20$ & $5$ & $1.00$ & $0.50$ & $1.00$\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Feedback strictly helps (a positive result)}
+\begin{propfive}[Adaptive gates beat the non-adaptive frontier]
+On the canonical family with $B>m$, the \emph{test-then-fallback} gate---probe one advised block and, on a miss, run the remaining budget as the oblivious backbone---achieves consistency $c=1$ and robustness $r\ge(1-1/B)\beta$ \emph{simultaneously}, strictly above the non-adaptive frontier of Theorem~2 (which caps robustness at $r^\star(1)=(2\beta-1)/\beta<\beta$ for $\beta>\tfrac12$, and at $0$ for $\beta\le\tfrac12$).
+\end{propfive}
+\begin{proof}
+At $\eta{=}0$ the advised blocks are exactly the events, so firing them recalls all $m$ (using $m\le B$ fires); hence $c=1$. At $\eta{=}1$ the first probe lands in an advised block, which is empty---a miss that reveals the adversarial case---and the remaining $B{-}1$ fires run as a random-phase periodic backbone, recalling each event with probability at least $(1-1/B)\beta$ by Lemma~1.
+\end{proof}
+\begin{figure}[t]\centering
+\fbox{\begin{minipage}{0.93\columnwidth}
+\small
+\textbf{Algorithm 2: \textsc{Test-Then-Fallback}} (feedback-aware)\\[2pt]
+\textbf{Input:} budget $a$, window $W$, cue $x_t$; per-fire detector hit/miss feedback.\\
+\textbf{1.} \emph{Probe.} Spend a few fires on the top advice-ranked frames and record detector hits/misses.\\
+\textbf{2.} \emph{Decide.} If the probe hit-rate exceeds a threshold (cue trustworthy), keep trusting the cue (small $\lambda$); otherwise \emph{fall back} and run the remaining budget as an oblivious periodic backbone ($\lambda\to1$).\\
+\textbf{Guarantee (Prop.~5):} on the canonical family with $B>m$, attains $c\approx1$ and $r\ge(1-1/B)\beta$ at once---strictly beyond the non-adaptive frontier.
+\end{minipage}}
+\caption{The feedback-aware gate verifies the cue with a few probes before committing, escaping the non-adaptive impossibility.}
+\label{alg:ttf}
+\end{figure}
+
+\noindent This formalizes Remark~\ref{rem:feedback}: the practical lesson is to spend a few probes \emph{verifying} the cue before committing the budget, rather than trusting it outright. It also delimits our impossibility precisely---it is a statement about \emph{non-adaptive} policies, and the value of adaptivity is exactly the gap between $r=0$ and $r\approx\beta$ at $c=1$.
+
+\section{HEDGE-GATE: A Pareto-Optimal Meta-Policy}\label{sec:hedge}
+Theorems~1$'$ and~2 are constructive: the optimal non-adaptive policy simply \emph{splits the budget} between an oblivious backbone (for robustness) and the advice gate (for consistency). We call it HEDGE-GATE.
+
+\begin{figure}[t]
+\centering
+\fbox{\begin{minipage}{0.93\columnwidth}
+\small
+\textbf{Algorithm 1: \textsc{HEDGE-GATE}$(\lambda)$}\\[2pt]
+\textbf{Input:} activation budget $a$, window $W$, trust dial $\lambda\in[0,1]$, cue stream $x_t$.\\
+\textbf{1.} \emph{Backbone (robustness).} Fire an oblivious random-phase periodic schedule at rate $\lambda a$ (stride $\lceil 1/(\lambda a)\rceil$); this is independent of the cue.\\
+\textbf{2.} \emph{Advice arm (consistency).} With the remaining budget $(1{-}\lambda)a$, fire the not-yet-fired frames of highest cue score $q(x_t)$ (a budget-tuned threshold).\\
+\textbf{Guarantee:} $\mathbb E[R]\ge\lambda\beta$ on every instance/cue (Theorem~1$'$); on the canonical family $(c,r)=((1{-}\lambda)+\lambda\beta,\ \lambda\beta)$ lies on the frontier (Theorem~2).
+\end{minipage}}
+\caption{HEDGE-GATE interpolates between trusting the cue ($\lambda{=}0$) and the oblivious periodic schedule ($\lambda{=}1$).}
+\label{alg:hedge}
+\end{figure}
+
+\textbf{The dial $\lambda$ is a certificate.} An operator who must guarantee recall $\ge\rho$ regardless of cue quality picks $\lambda\ge\rho/\beta$ (so the backbone floor $\lambda\beta\ge\rho$), then lets the remaining budget chase headroom. This converts a vague ``trust the model'' knob into a worst-case recall certificate---\emph{exploit predictions, never trust them}.
+
+\textbf{Smoothness.} Between the two extremes, performance degrades gracefully.
+\begin{propfour}[Smoothness]
+Under a per-event independence model (Assumption~A, Appendix): the advice arm recalls each event independently with probability $(1{-}\eta)\kappa(\lambda)$ and the backbone with probability $\lambda\beta$, independently. Then $\mathbb E[R_\lambda(\eta)]=\lambda\beta+(1{-}\eta)\,\kappa(\lambda)\,(1{-}\lambda\beta)$, which is \emph{affine} in $\eta$ with $|\,\mathrm dR/\mathrm d\eta\,|\le1$: degradation is monotone, with no threshold or cliff.
+\end{propfour}
+\begin{proof}
+An event is recalled iff at least one arm succeeds: $1-(1{-}\lambda\beta)(1-(1{-}\eta)\kappa(\lambda))=\lambda\beta+(1{-}\eta)\kappa(\lambda)(1{-}\lambda\beta)$; linearity over the $m$ events gives $\mathbb E[R_\lambda(\eta)]$.
+\end{proof}
+
+\textbf{Cost.} HEDGE-GATE runs in $O(1)$ state and $O(1)$ work per frame (a periodic counter plus a streaming threshold); it requires no training and adds negligible overhead to the cheap cue it already computes.
+
+\subsection*{Setting the dial in practice}
+To guarantee a worst-case recall $\rho$ irrespective of cue quality, an operator picks the smallest $\lambda$ with $\lambda\beta\ge\rho$, i.e.\ $\lambda\ge\rho/\beta$, and spends the rest of the budget on the cue. Below $a=1/(W{+}1)=0.125$ the trade-off is active and a real fraction of the budget must go to the backbone; at $a\ge0.125$ the certificate already gives $\beta{=}1$, so HEDGE-GATE can devote the entire budget to the cue with no robustness loss (it can only help). This turns ``how much should I trust the model?'' into a one-line worst-case computation.
+
+\noindent\textbf{A practical recipe.}
+\begin{enumerate}
+\item Compute $\beta=\min(1,(W{+}1)/K)$ from the energy budget ($K=\lceil1/a\rceil$).
+\item Estimate the cue's onset-AUC offline; set $\eta=1-\mathrm{AUC}$.
+\item Fix a worst-case recall target $\rho$ and set $\lambda=\min(1,\rho/\beta)$.
+\item Run Algorithm~1. If $\eta$ is small the advice arm adds headroom for free; if $\eta\approx1$ the backbone still delivers $\lambda\beta\ge\rho$.
+\end{enumerate}
+
+\noindent\textbf{Implementation notes.} HEDGE-GATE drops into an existing pipeline as a thin wrapper around the cue the system already computes. The backbone is a modular counter ($t\bmod K'$); the advice arm reuses the gate's existing threshold, lowered to spend only $(1{-}\lambda)a$ of the budget. State is a single integer and a running threshold estimate; there is no model to train or store, and the policy is deterministic given the cue, easing certification and reproducibility. On a microcontroller the marginal cost over the bare cue is one comparison and one increment per frame.
+
+\section{Empirical Evaluation}\label{sec:eval}
+\textbf{Setup.} We evaluate at three layers: (A) measured detection anchors on our benchmark corpus; (B) a calibrated synthetic corruption sweep that exercises the full range $\eta\in[0,1]$; and (C) a real-data run that recomputes cues and events on raw video. All recall is windowed ($W=7$) and reported with video-level bootstrap ($B=1000$, seed $42$); confidence intervals are $95\%$.
+
+\subsection{Experimental setup}
+\textbf{Cue.} The motion cue is the mean absolute inter-frame difference on grayscale frames downscaled to $64\times48$---a standard cheap motion-density proxy that uses no ground truth and matches a standard score-gate family. \textbf{Events.} Ground-truth foreground masks define event frames (foreground pixel fraction above $8\times10^{-4}$); maximal runs of at least two event frames are events, with onset at the run's first frame and recall windowed at $W{=}7$. \textbf{Datasets.} BMC ($20$ synthetic/real surveillance clips), LASIESTA ($48$ indoor/outdoor clips), and CDnet2014 ($53$ clips across $11$ categories, each evaluated within its temporal region of interest). \textbf{Policies.} Periodic ($\lambda{=}1$), pure gate ($\lambda{=}0$), and HEDGE-GATE for $\lambda\in\{0,0.25,0.5,0.75,1\}$; the corruption sweep injects permutation noise $p\in\{0,0.2,\dots,1.0\}$ into the cue to traverse $\eta$. \textbf{Statistics.} Per policy and activation $a\in\{0.1,0.2,0.333\}$ we compute per-video windowed recall and report the video-level bootstrap mean with a $95\%$ confidence interval ($B{=}1000$, seed $42$). The synthetic generator, the $\pi(K,\tau)$ replay, HEDGE-GATE, and the raw-video adapter are released for reproducibility.
+
+\subsection{Measured anchors (benchmark corpus)}
+Fig.~\ref{fig:anchor} shows the detection-grounded frontier: the periodic schedule dominates all gates at every activation below $0.5$. At $a=0.20$: periodic $0.984$, score-gate $0.284$, random-forest gate $0.200$; the det-gate gap versus activation-matched periodic is $-0.359$ (CI$_{95}$ $[-0.493,-0.242]$). This realizes the $\eta\to1$ robustness arm of Theorem~1$'$ by deployed predictors.
+
+\begin{figure}[t]\centering
+\includegraphics[width=0.98\columnwidth]{fig1.png}
+\caption{Measured recall--energy anchors (benchmark corpus): the oblivious periodic schedule vs.\ threshold-swept score (S) and random-forest (RF) gates (continuous curves), and the learned RL (DQN) gate as isolated per-penalty points ($\times$). At $a=0.20$ periodic $=0.984$ while the deterministic gates recover only $20$--$28\%$; every DQN point sits at activation $\ge0.48$ and none enters the low-activation deployment regime ($a\le0.33$, shaded).}
+\label{fig:anchor}
+\end{figure}
+
+\subsection{Calibrated synthetic sweep (theory validation)}
+We generate synthetic event streams calibrated to the measured sparse duration law (median $1$, mean $\approx6$, CV $\approx4.7$) and sweep cue corruption. Three predictions of the theory are confirmed. (i) \emph{Periodic certificate}: simulated periodic recall matches $\beta$ to within bootstrap noise ($0.78/1.00/1.00$ at $a=0.1/0.2/0.333$). (ii) \emph{Smoothness} (Fig.~\ref{fig:smooth}): under uninformative noise, HEDGE-GATE recall is affine in $\eta$ (Pearson $r$ up to $-0.99$), validating Proposition~4. (iii) \emph{Frontier and floor} (Figs.~\ref{fig:frontier},\ref{fig:adv}): in the scarce-budget regime the pure gate ($\lambda{=}0$) collapses toward $0$ under adversarial advice while HEDGE-GATE holds the floor $\lambda\beta$ (Theorem~1$'$); across budgets, \textsc{SAT-GATE}'s $(c,r)$ points trace the general tight frontier $r^\star(c)$ of \eqref{eq:frontier} exactly (max deviation $<10^{-3}$), and in the deployed high-budget regime ($\beta{=}0.8$) they sit above HEDGE-GATE's endpoints-only trajectory (Theorem~2--3).
+
+\begin{figure*}[t]\centering
+\includegraphics[width=\textwidth]{fig2.png}
+\caption{Synthetic smoothness (noise regime): HEDGE-GATE recall is affine in prediction error $\eta$ for each trust $\lambda$; the dashed line is the periodic certificate, the dotted line the oblivious-random level, and the shaded band the deployment $\eta$ range inferred from the measured cue AUC.}
+\label{fig:smooth}
+\end{figure*}
+
+\begin{figure*}[t]\centering
+\includegraphics[width=0.92\textwidth]{fig3.png}
+\caption{General tight consistency--robustness frontier $r^\star(c)$ (black) for non-adaptive gates. \emph{Left} ($\beta{=}0.4$, scarce budget): \textsc{HEDGE-GATE} and \textsc{SAT-GATE} coincide on the line $r=\beta(1-c)/(1-\beta)$. \emph{Right} ($\beta{=}0.8$, the deployed high-budget regime): \textsc{SAT-GATE} (blue) meets the frontier everywhere, while \textsc{HEDGE-GATE} (red, dashed) reaches it only at the endpoints and trails by up to $0.19$ in between; the star marks the pure-periodic point $(\beta,\beta)$.}
+\label{fig:frontier}
+\end{figure*}
+
+\begin{figure*}[t]\centering
+\includegraphics[width=\textwidth]{fig4.png}
+\caption{Adversarial advice: the pure gate ($\lambda{=}0$) collapses below the oblivious-random level toward $0$, while HEDGE-GATE$(\lambda)$ holds its backbone floor $\lambda\beta$ regardless of cue quality (Theorem~1$'$). Red band: measured S/RF anchors.}
+\label{fig:adv}
+\end{figure*}
+
+\noindent Read together, Figs.~\ref{fig:smooth}--\ref{fig:adv} separate two failure modes that deployment conflates. Uninformative noise (Fig.~\ref{fig:smooth}) merely slides recall down to the random level $\beta$---bad, but bounded. Adversarial advice (Fig.~\ref{fig:adv}) is qualitatively worse: the pure gate falls \emph{below} $\beta$ toward $0$, because it actively concentrates budget away from events. The measured deployment gates (red band) sit in this sub-$\beta$ regime, which is why they \emph{lose} to an oblivious schedule rather than merely tie it; HEDGE-GATE's flat floor across both panels is the $\lambda\beta$ guarantee of Theorem~1$'$.
+
+\subsection{Real-data run on raw video}
+We extract real motion cues (mean $|\Delta\text{frame}|$, computed from frames---not ground truth) and event streams (from ground-truth masks, minimum duration $2$) for a 121-video corpus spanning BMC, LASIESTA, and CDnet2014 (ROI-aligned, processed \emph{uncapped}: all frames per video, $131{,}325$ frames total); $77$ videos carry $\ge2$ events ($791$ events total). The real cue's onset-AUC is $0.455$ overall (Table~\ref{tab:perds})---\emph{below} the chance level $\tfrac12$ and below the measured band $[0.49,0.79]$, i.e.\ uninformative-to-mildly-adverse at onsets (the uncapped pass, spanning full videos, exposes more low-signal frames than the earlier capped subset). This is precisely the high-$\eta$ regime where Theorem~1$'$ forbids gains, and it makes the deployment collapse the expected outcome rather than a surprise. Table~\ref{tab:real} confirms the deployment finding: the deployed motion gate trails the periodic schedule at every budget, with non-overlapping confidence intervals at low activation (Fig.~\ref{fig:real}).
+
+\begin{table}[t]\centering\caption{Real-data corpus and cue informativeness (onset-AUC; $\tfrac12$ = uninformative).}\label{tab:perds}
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Dataset & \#videos & onset-AUC & note\\
+\midrule
+BMC & 20 & 0.346 & synthetic+real\\
+LASIESTA & 48 & 0.463 & indoor/outdoor\\
+CDnet2014 & 53 & 0.505 & 11 cats, ROI-aligned\\
+\midrule
+Overall & 121 & 0.455 & deployment $\eta\approx0.55$\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]\centering\caption{Real-data (\emph{uncapped}): deployed motion gate vs.\ periodic (windowed recall, $W{=}7$, $B{=}1000$; CI$_{95}$ in brackets). $77$ videos, $791$ events.}\label{tab:real}
+\small
+\begin{tabular}{lccc}
+\toprule
+$a$ & motion gate & periodic & gap\\
+\midrule
+$0.10$ & $0.238\,[0.192,0.291]$ & $0.796\,[0.760,0.831]$ & $-0.558$\\
+$0.20$ & $0.471\,[0.402,0.534]$ & $1.000\,[1.000,1.000]$ & $-0.529$\\
+$0.333$ & $0.655\,[0.594,0.714]$ & $1.000\,[1.000,1.000]$ & $-0.345$\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure*}[t]\centering
+\includegraphics[width=\textwidth]{fig5.png}
+\caption{Real-data corruption sweep (uncapped 77-video corpus): HEDGE-GATE recall vs.\ $\eta$. The deployed cue sits at $\eta\approx0.55$ (narrow band); gate-heavy policies trail the periodic certificate, consistent with Theorem~1$'$ and Theorem~2.}
+\label{fig:real}
+\end{figure*}
+
+\subsection{Learned and reinforcement-learning gates}
+The collapse is not confined to hand-crafted cues. In the measured anchors (Fig.~\ref{fig:anchor}) a learned random-forest gate recovers only $20.0\%$ of events at $a{=}0.20$---\emph{worse} than the score-gate's $28.4\%$---and a DQN gate cannot even reach the deployment regime (minimum activation $0.476$). With the learned-cue probe of \S\ref{sec:learnedcue}, hand-crafted, learned, and RL gates all lose to a periodic loop: Theorem~2 caps every non-adaptive timing predictor by the \emph{same} frontier, so capacity cannot manufacture onset information the cue lacks---only the oblivious backbone or detector feedback (Proposition~5) raises the floor.
+
+\subsection{A stronger learned cue does not rescue the gate}\label{sec:learnedcue}
+To rule out that the collapse is an artifact of a weak hand-crafted cue, we train a \emph{nonlinear learned cue}---a gradient-boosted-tree classifier on seven cheap, ground-truth-free per-frame features (motion density and its dispersion, connected-component counts, two background-model disagreement signals, illumination variance)---to predict onset windows, and evaluate it \emph{cross-scene} by leave-one-CDnet-category-out ($53$ clips, $11$ categories). The learned cue is genuinely stronger \emph{and} it generalizes: onset-AUC rises from $0.40$ for the single motion feature to $0.60$ within-scene and $0.61$ cross-scene---no over-fitting collapse. Yet at the resulting error $\eta\approx0.39$ it still \emph{loses} to the oblivious periodic schedule at every budget (Table~\ref{tab:learned}); capacity lifts the gate (from $0.24$ to $0.41$ at $a{=}0.1$) but nowhere near the periodic floor. This is Theorem~1$'$/Theorem~2 made concrete: a richer function class raises the cue's onset-AUC only marginally, and a cheap cue---hand-crafted or learned---does not clear the bar where content-awareness would help. So the deployment collapse is a property of the \emph{cue's information}, not of a particular gate design.
+
+\begin{table}[t]\centering\caption{A stronger, cross-scene-generalizing learned cue (gradient-boosted trees on seven cheap features; leave-one-CDnet-category-out) still trails the oblivious periodic schedule at every budget (windowed recall, $W{=}7$; non-overlapping $95\%$ CIs). Cross-scene onset-AUC: raw motion $0.40$ vs.\ learned $0.61$.}\label{tab:learned}
+\small
+\begin{tabular}{lccc}
+\toprule
+windowed recall & $a{=}0.1$ & $a{=}0.2$ & $a{=}0.333$\\
+\midrule
+periodic (oblivious) & $0.80$ & $1.00$ & $1.00$\\
+learned-cue gate & $0.41$ & $0.54$ & $0.71$\\
+gap (gate $-$ periodic) & $-0.39$ & $-0.46$ & $-0.29$\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Sensitivity to window and budget}
+The trade-off is governed entirely by $\beta=\min(1,(W{+}1)/K)$, so its severity is predictable from two deployment constants. Table~\ref{tab:beta2} tabulates $\beta$ over staleness windows $W\in\{3,7,15\}$ and budgets $a\in\{0.05,0.1,0.2\}$. Two regularities follow. First, the trade-off is active ($\beta<1$) only in the low-budget, tight-window corner; a looser staleness tolerance ($W{=}15$) erases it by $a{=}0.1$. Second, where $\beta<1$, the robustness floor a designer can buy scales linearly in both $\lambda$ and $\beta$, so halving the energy budget (which roughly doubles $K$ and halves $\beta$) halves the achievable worst-case recall at fixed trust. This gives a back-of-envelope feasibility test before any data are collected.
+
+\begin{table}[t]\centering\caption{Oblivious rate $\beta=\min(1,(W{+}1)/K)$ across staleness window $W$ and activation $a$ ($K=\lceil1/a\rceil$). The consistency--robustness trade-off is active only where $\beta<1$ (shaded corner).}\label{tab:beta2}
+\small
+\begin{tabular}{lccc}
+\toprule
+& $a{=}0.05$ ($K{=}20$) & $a{=}0.10$ ($K{=}10$) & $a{=}0.20$ ($K{=}5$)\\
+\midrule
+$W{=}3$ & $0.20$ & $0.40$ & $0.80$\\
+$W{=}7$ & $0.40$ & $0.80$ & $1.00$\\
+$W{=}15$ & $0.80$ & $1.00$ & $1.00$\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Statistical robustness and effect sizes}
+The headline gaps are large relative to their uncertainty. At $a{=}0.10$ the gate's $95\%$ interval $[0.192,0.291]$ is disjoint from periodic's $[0.760,0.831]$---a separation of $0.47$ recall; at $a{=}0.20$ the intervals $[0.402,0.534]$ and $\{1.0\}$ are disjoint by $0.47$. Video-level bootstrap ($B{=}1000$) resamples whole videos, so the intervals absorb between-scene heterogeneity, the dominant variance source in cross-scene deployment. The per-category view below shows the sign of the gap is invariant across all thirteen groups, not an artifact of pooling; even the small-$n$ categories, which we flag, only deepen it. We therefore regard the deployment finding as robust to both sampling noise and dataset composition.
+
+\subsection{Per-category breakdown}
+Table~\ref{tab:percat} and Fig.~\ref{fig:percat} decompose the real-data result by dataset and by CDnet category. The motion gate trails the periodic schedule in \emph{every} one of the thirteen groups at $a{=}0.20$, with the gap ranging from $-0.30$ (dynamicBackground) to $-1.0$ (baseline, whose cue onset-AUC is $\approx0.30$, i.e.\ \emph{below} chance). Periodic recall is $1.0$ throughout at $a{=}0.20$ ($K{=}5\le W{+}1$), so the certificate $\beta{=}1$ is realized while the cue-driven gate squanders budget on motion-rich, event-poor frames. This is Theorem~1$'$ instantiated category by category: wherever the cue is uninformative or anti-informative at onsets, committing budget to it is strictly worse than an oblivious rhythm. The pattern broadly tracks cue quality---the mildest collapse is dynamicBackground ($-0.30$, among the highest-AUC groups at $\approx0.57$), while the sub-chance categories (baseline and thermal, onset-AUC $\approx0.30$) collapse to near zero.
+
+\begin{table}[t]\centering\caption{Real-data per-category breakdown (windowed recall, $W{=}7$, \emph{uncapped}, ROI-aligned). The motion gate (uncorrupted cue) loses to periodic in all groups. ``AUC'' is the cue onset-AUC ($\tfrac12$ = uninformative).}\label{tab:percat}
+\footnotesize
+\begin{tabular}{lccccc}
+\toprule
+Group & $n$ & AUC & gate$_{.20}$ & per$_{.20}$ & gap\\
+\midrule
+BMC & 20 & 0.346 & 0.509 & 1.000 & $-0.491$\\
+LASIESTA & 17 & 0.463 & 0.520 & 1.000 & $-0.480$\\
+CDnet:dyn.Backgr. & 5 & 0.568 & 0.700 & 1.000 & $-0.300$\\
+CDnet:nightVideos & 6 & 0.528 & 0.590 & 1.000 & $-0.410$\\
+CDnet:turbulence & 3 & 0.415 & 0.545 & 1.000 & $-0.455$\\
+CDnet:PTZ & 4 & 0.533 & 0.506 & 1.000 & $-0.494$\\
+CDnet:cameraJitter & 3 & 0.466 & 0.493 & 1.000 & $-0.507$\\
+CDnet:lowFrameRate & 3 & 0.512 & 0.490 & 1.000 & $-0.510$\\
+CDnet:badWeather & 4 & 0.497 & 0.312 & 1.000 & $-0.688$\\
+CDnet:shadow & 5 & 0.575 & 0.288 & 1.000 & $-0.712$\\
+CDnet:interm.ObjMot. & 3 & 0.586 & 0.250 & 1.000 & $-0.750$\\
+CDnet:thermal & 3 & 0.329 & 0.048 & 1.000 & $-0.952$\\
+CDnet:baseline$^\dagger$ & 1 & 0.295 & 0.000 & 1.000 & $-1.000$\\
+\midrule
+\textbf{All} & \textbf{77} & \textbf{0.455} & \textbf{0.471} & \textbf{1.000} & $\mathbf{-0.529}$\\
+\bottomrule
+\end{tabular}
+\\[2pt]{\scriptsize $^\dagger$ small group ($n\le2$); shown for completeness.}
+\end{table}
+
+\begin{figure}[t]\centering
+\includegraphics[width=0.98\columnwidth]{fig6.png}
+\caption{Per-category deployment gap at $a{=}0.20$ (gate $-$ periodic). Every category is negative: the motion gate loses everywhere, most severely where the cue is sub-chance at onsets.}
+\label{fig:percat}
+\end{figure}
+
+\subsection{Reproducibility and artifacts}
+The release contains: the synthetic event-process generator and the $\pi(K,\tau)$ replay engine; HEDGE-GATE and the video-level bootstrap; the raw-video adapter for BMC, LASIESTA, and CDnet2014 (with temporal-ROI handling and the foreground-mask event extractor); the corruption-sweep driver; and the figure/table generators. Every figure and number in \S\ref{sec:eval} is regenerated by a single command with fixed seed $42$ and $B{=}1000$; intermediate per-video cues and event streams are cached, so results are byte-stable across runs; the corpus reported here is the \emph{uncapped} extraction (all frames per video), reproduced from cached per-video cues on a machine with the raw datasets.
+
+\subsection{Reproducibility}
+All quantities are produced by a self-contained harness (event-process generator, $\pi(K,\tau)$ replay, HEDGE-GATE, bootstrap) and the raw-video adapter; figures, CSVs, and a metrics-summary JSON are released as supplementary material.
+
+\subsection{Threats to validity}
+Three points temper the empirical claims. (i) \emph{Cue choice}: we use a generic motion-difference cue; a stronger learned cue could raise the onset-AUC, but our evaluation found even learned gates in the same $[0.49,0.79]$ band, and Theorem~1$'$ caps the benefit of \emph{any} non-adaptive cue at high $\eta$. (ii) \emph{Frame coverage}: the corpus is processed uncapped (all frames); an earlier $300$-frame pilot gave the same gap signs and $\beta$-floor, confirming cap-independence---the video-level CI width is governed by the number of videos, not the frames per video. (iii) \emph{Detector idealization}: recall assumes a reliable detector on fired frames; a uniform detector miss-rate scales all policies' recall by the same factor, leaving the comparison intact.
+
+\textbf{Why not simply always use periodic?} Because when the cue \emph{is} informative ($\eta$ small), HEDGE-GATE with small $\lambda$ strictly dominates periodic, approaching the per-scene oracle (Fig.~\ref{fig:frontier}); and because the operator rarely knows $\eta$ in advance. HEDGE-GATE is never worse than periodic by more than the budget it reserves, yet captures the cue's upside when it materializes---periodic is the special case $\lambda{=}1$ and the pure gate the case $\lambda{=}0$, so shipping HEDGE-GATE dominates committing to either extreme.
+
+\textbf{Relation to fixed-rate certificates.} Worst-case \emph{latency} certificates for fixed-rate oblivious schedules are a complementary guarantee; our backbone is exactly such a schedule and $\beta$ is its recall counterpart. This paper adds the \emph{advice} layer and shows precisely how far a predictor may be trusted before the guarantee is forfeited---\emph{exploit predictions, never trust them}.
+
+
+\section{Discussion, Limitations, and Future Work}\label{sec:disc}
+\textbf{Scope.} Our bounds address windowed event recall under hard activation budgets; latency-percentile objectives are a complementary direction beyond our scope. The lower bound is regime-indexed: a coverage bound (Theorem~1) for dense events and an advice-commitment bound (Theorem~1$'$) for the high-budget regime $a\ge1/(W{+}1)$, where the former is vacuous.
+
+\textbf{The non-adaptive scope is the deployed scope.} Theorems~2--3 are proven for non-adaptive gates---precisely the class of deployed gates (threshold, random-forest, and HEDGE-GATE itself). Remark~\ref{rem:feedback} shows that a feedback-aware \emph{adaptive} gate can exceed the non-adaptive frontier by testing the cue and falling back; this is a \emph{positive} direction with a concrete design implication (probe before committing), and characterizing the optimal feedback-aware gate is the main open problem we leave.
+
+\textbf{Modeling assumptions.} Proposition~4 assumes per-event independence of advice errors; real cues are correlated across nearby events, so the affine law is exact only in expectation under the model and is corroborated empirically (Pearson $r$ up to $-0.99$). The real-data run processes all frames (uncapped); relative to a $300$-frame pilot the video-level confidence intervals tighten only modestly, since their width is set by the number of videos, not the frames per video. The lower-bound construction uses adversarial onset placement within empirically observed burst statistics; a distributional refinement may narrow the gap between worst-case and typical behavior.
+
+
+\subsection{Future work}
+\begin{enumerate}
+\item \emph{Optimal feedback-aware gates.} Proposition~5 shows feedback helps; the exact achievable region for adaptive gates---and the probe budget needed to certify a cue---remains open.
+\item \emph{Heterogeneous detector cost.} When detector cost varies with input (resolution-adaptive inference), the budget becomes a knapsack and $\beta$ generalizes to a cost-weighted coverage; the frontier is expected to persist.
+\item \emph{Online dial tuning.} Estimating $\eta$ online from sparse feedback to adapt $\lambda$ would close the loop between the certificate and the data stream.
+\end{enumerate}
+
+
+\textbf{When \emph{does} content-awareness help?} Our results are not a blanket dismissal of adaptivity. The advice arm strictly improves recall whenever $\eta$ is genuinely small---e.g.\ a same-scene, calibrated cue, or a high-quality learned predictor whose onset-AUC stays well above $\tfrac12$ at deployment. The theory simply insists that this benefit be \emph{earned}: keep the oblivious floor, scale trust by the measured $\eta$, and (with feedback) verify before committing. Equivalently, content-awareness helps exactly when the cue's onset-AUC, measured on held-out scenes, materially exceeds chance; our benchmark and real-data run show that common motion cues do not clear this bar cross-scene, which is why periodic wins in practice.
+
+\textbf{A deployment decision in three numbers.} Suppose a solar-powered trail camera affords $a{=}0.1$ ($K{=}10$) with staleness $W{=}7$, so $\beta{=}0.8$. The operator computes $\beta$, then measures the cue's onset-AUC on a held-out scene. If it is high (say $0.9$, $\eta{=}0.1$) a small $\lambda$ harvests the cue and recall approaches the oracle; if it is the near-chance $0.46$ we measure ($\eta{\approx}0.55$), the recipe degenerates to $\lambda{\to}1$---ship the one-line periodic loop, which already guarantees $\beta{=}0.8$. HEDGE-GATE thus does not merely propose a policy; it tells the operator \emph{which} policy to ship, and for today's motion cues the answer is the oblivious one.
+
+\textbf{$\beta$ as a coverage capacity.} It helps to read $\beta=\min(1,(W{+}1)/K)$ as the \emph{capacity} of the oblivious channel: with one fire every $K$ frames and a tolerance of $W{+}1$, a fraction $(W{+}1)/K$ of arbitrary onsets is unavoidably covered. The advice arm tries to raise effective capacity by aiming fires at onsets; Theorem~1$'$ says that under adversarial advice this aiming is worthless, and Theorem~2 says that under honest advice the gain is bounded by exactly how much budget was diverted from the guaranteed channel. The frontier is thus a capacity-allocation statement: every unit of trust trades guaranteed capacity for speculative capacity.
+
+\textbf{On the worst-case family.} Our converse uses a block family with disjoint windows and one event per block. This is the natural hardest case: overlapping windows only help the scheduler (one fire then covers several onsets), and clustering events only reduces the number of distinct targets. The construction is therefore not adversarially exotic---it is the clean limit of the sparse, bursty event statistics measured on real video (median event duration $1$, heavy-tailed). Relaxing disjointness (real, overlapping windows) leaves the gap signs unchanged in our experiments.
+
+\section{Conclusion}\label{sec:conc}
+We recast content-aware frame gating as an online algorithm consulting an untrusted motion predictor, and proved that its empirically observed collapse is the robustness arm of a genuine consistency--robustness trade-off. An advice-commitment lower bound certifies that, when events are sparse, a cue-committed gate yields \emph{zero} worst-case recall (Theorem~1$'$); and a general tight frontier $r^\star(c)$ pins down exactly what any non-adaptive gate can achieve in \emph{every} budget regime---a robustness ratio $\Omega(1/\varepsilon)$ when the budget is scarce, and a positive full-consistency floor $(2\beta-1)/\beta$ when it is ample. SAT-GATE attains this frontier everywhere and the simpler HEDGE-GATE attains it in the scarce-budget regime, both with a certifiable dial and negligible cost. A 121-video real-data study confirms that deployed motion cues live in the high-$\eta$, sparse-event regime where Theorem~1$'$ forbids gains and the oblivious floor~$\beta$ wins. The practical message is not ``never adapt'' but ``never \emph{commit} to an untrusted cue without an oblivious floor---and, if feedback is available, verify before committing.''
+
+\appendices
+\section{Assumption A and extended remarks}
+\textbf{Assumption A (per-event independence).} Conditioned on $\eta$, the advice arm of HEDGE-GATE recalls each event independently with probability $(1{-}\eta)\kappa(\lambda)$, where $\kappa(\lambda)\ge0$ is the advice-arm coverage at $\eta{=}0$ (with $\kappa(1){=}0$, no advice budget); the backbone recalls each event with probability $\lambda\beta$, independently of $\eta$ and of the advice arm. Real cues exhibit positive correlation across temporally close events; under such correlation the recall law of Proposition~4 holds in expectation and is corroborated empirically. Without Assumption~A the affine law should be read as a claim supported by the measured Pearson correlations $r\in[-0.99,-0.88]$.
+
+\textbf{On Theorem~1 (dense regime).} The proof in \S\ref{sec:lb} is a counting argument on the canonical block family: with $m=B$ disjoint blocks, mislabeled events can be rescued only by the $\delta B$ oblivious fires, each covering at most one block, giving $R\le(1-\eta)+\delta$. Together with Theorem~1$'$ (high-budget) this forms a complete regime-indexed lower bound; the general frontier of Theorem~2 and Proposition~4 (under Assumption~A) are likewise complete.
+
+\textbf{On the general frontier (Theorem~2--3).} The piecewise bound \eqref{eq:frontier} is obtained by maximising the sum of the $m$ smallest firing probabilities subject to the consistency and budget constraints; the symmetric optimiser (advised blocks at $c$, a uniform floor $g$ elsewhere) is optimal by a majorisation/exchange argument---moving firing mass from a larger non-advised block to a smaller one preserves the budget and weakly increases the sum of the $m$ smallest $p_b$, so equalising is optimal (equivalently, the sum of the $k$ smallest coordinates is Schur-concave)---and \textsc{SAT-GATE} realises it. The scarce-budget branch ($\beta\le\tfrac12$) recovers the earlier single-line frontier; the high-budget branch ($\beta>\tfrac12$) is new and shows the deployed regime retains a positive full-consistency floor $r^\star(1)=(2\beta-1)/\beta$. The claims here are cross-checked numerically by \texttt{code/validate\_frontier.py} (maximum deviation $<10^{-3}$ across $\beta\in\{0.2,0.4,0.6,0.8,0.9\}$).
+
+\section*{Acknowledgment}
+The author thanks the maintainers of the BMC, LASIESTA, and CDnet2014 corpora.
+
+\begin{thebibliography}{99}
+\bibitem{lv} T.~Lykouris and S.~Vassilvitskii, ``Competitive caching with machine learned advice,'' \emph{J. ACM}, vol.~68, no.~4, pp.~1--25, 2021.
+\bibitem{purohit} M.~Purohit, Z.~Svitkina, and R.~Kumar, ``Improving online algorithms via ML predictions,'' in \emph{Proc. NeurIPS}, 2018.
+\bibitem{mv} M.~Mitzenmacher and S.~Vassilvitskii, ``Algorithms with predictions,'' \emph{Commun. ACM}, vol.~65, no.~7, pp.~33--35, 2022.
+\bibitem{rohatgi} D.~Rohatgi, ``Near-optimal bounds for online caching with machine learned advice,'' in \emph{Proc. ACM-SIAM SODA}, 2020.
+\bibitem{bamas} \'E.~Bamas, A.~Maggiori, and O.~Svensson, ``The primal-dual method for learning augmented algorithms,'' in \emph{Proc. NeurIPS}, 2020.
+\bibitem{antoniadis} A.~Antoniadis, T.~Gouleakis, P.~Kleer, and P.~Kolev, ``Secretary and online matching problems with machine learned advice,'' in \emph{Proc. NeurIPS}, 2020.
+\bibitem{kraska} T.~Kraska, A.~Beutel, E.~H.~Chi, J.~Dean, and N.~Polyzotis, ``The case for learned index structures,'' in \emph{Proc. ACM SIGMOD}, 2018.
+\bibitem{noscope} D.~Kang, J.~Emmons, F.~Abuzaid, P.~Bailis, and M.~Zaharia, ``NoScope: Optimizing neural network queries over video at scale,'' \emph{Proc. VLDB Endow.}, vol.~10, no.~11, 2017.
+\bibitem{focus} K.~Hsieh \emph{et al.}, ``Focus: Querying large video datasets with low latency and low cost,'' in \emph{Proc. USENIX OSDI}, 2018.
+\bibitem{glimpse} T.~Y.-H.~Chen \emph{et al.}, ``Glimpse: Continuous, real-time object recognition on mobile devices,'' in \emph{Proc. ACM SenSys}, 2015.
+\bibitem{chameleon} J.~Jiang, G.~Ananthanarayanan, P.~Bodik, S.~Sen, and I.~Stoica, ``Chameleon: Scalable adaptation of video analytics,'' in \emph{Proc. ACM SIGCOMM}, 2018.
+\bibitem{reducto} Y.~Li, A.~Padmanabhan, P.~Zhao, Y.~Wang, G.~H.~Xu, and R.~Netravali, ``Reducto: On-camera filtering for resource-efficient real-time video analytics,'' in \emph{Proc. ACM SIGCOMM}, 2020.
+\bibitem{aoi} R.~D.~Yates \emph{et al.}, ``Age of information: An introduction and survey,'' \emph{IEEE J. Sel. Areas Commun.}, vol.~39, no.~5, 2021.
+\bibitem{qcd} T.~Banerjee and V.~V.~Veeravalli, ``Data-efficient quickest change detection,'' \emph{Sequential Analysis}, vol.~31, no.~1, 2012.
+\bibitem{lattanzi} S.~Lattanzi, T.~Lavastida, B.~Moseley, and S.~Vassilvitskii, ``Online scheduling via learned weights,'' in \emph{Proc. ACM-SIAM SODA}, 2020.
+\bibitem{im} S.~Im, R.~Kumar, M.~Montazer~Qaem, and M.~Purohit, ``Online knapsack with frequency predictions,'' in \emph{Proc. NeurIPS}, 2021.
+\bibitem{wei} A.~Wei, ``Better and simpler learning-augmented online caching,'' in \emph{Proc. APPROX/RANDOM}, 2020.
+\bibitem{anand} K.~Anand, R.~Ge, and D.~Panigrahi, ``Customizing ML predictions for online algorithms,'' in \emph{Proc. ICML}, 2020.
+\bibitem{mbloom} M.~Mitzenmacher, ``A model for learned Bloom filters and optimizing by sandwiching,'' in \emph{Proc. NeurIPS}, 2018.
+\bibitem{angelopoulos} S.~Angelopoulos, C.~D\"urr, S.~Jin, S.~Kamali, and M.~Renault, ``Online computation with untrusted advice,'' in \emph{Proc. ITCS}, 2020.
+\bibitem{antoniadisM} A.~Antoniadis, C.~Coester, M.~Eli\'a\v{s}, A.~Polak, and B.~Simon, ``Online metric algorithms with untrusted predictions,'' in \emph{Proc. ICML}, 2020.
+\bibitem{sun} B.~Sun, R.~Lee, M.~Hajiesmaili, A.~Wierman, and D.~Tsang, ``Pareto-optimal learning-augmented algorithms for online conversion problems,'' in \emph{Proc. NeurIPS}, 2021.
+\bibitem{christianson} N.~Christianson, J.~Shen, and A.~Wierman, ``Optimal robustness-consistency tradeoffs for learning-augmented metrical task systems,'' in \emph{Proc. AISTATS}, 2023.
+\bibitem{anand2} K.~Anand, R.~Ge, A.~Kumar, and D.~Panigrahi, ``Online algorithms with multiple predictions,'' in \emph{Proc. ICML}, 2022.
+\bibitem{dds} K.~Du, A.~Pervaiz, X.~Yuan, A.~Chowdhery, Q.~Zhang, H.~Hoffmann, and J.~Jiang, ``Server-driven video streaming for deep learning inference,'' in \emph{Proc. ACM SIGCOMM}, 2020.
+\bibitem{awstream} B.~Zhang, X.~Jin, S.~Ratnasamy, J.~Wawrzynek, and E.~A.~Lee, ``AWStream: Adaptive wide-area streaming analytics,'' in \emph{Proc. ACM SIGCOMM}, 2018.
+\bibitem{neurosurgeon} Y.~Kang, J.~Hauswald, C.~Gao, A.~Rovinski, T.~Mudge, J.~Mars, and L.~Tang, ``Neurosurgeon: Collaborative intelligence between the cloud and mobile edge,'' in \emph{Proc. ACM ASPLOS}, 2017.
+\bibitem{nexus} H.~Shen, L.~Chen, Y.~Jin, L.~Zhao, B.~Kong, M.~Philipose, A.~Krishnamurthy, and R.~Sundaram, ``Nexus: A GPU cluster engine for accelerating DNN-based video analysis,'' in \emph{Proc. ACM SOSP}, 2019.
+\bibitem{spinn} S.~Laskaridis, S.~I.~Venieris, M.~Almeida, I.~Leontiadis, and N.~D.~Lane, ``SPINN: Synergistic progressive inference of neural networks over device and cloud,'' in \emph{Proc. ACM MobiCom}, 2020.
+\bibitem{clockwork} A.~Gujarati, R.~Karimi, S.~Alzayat, W.~Hao, A.~Kaufmann, Y.~Vigfusson, and J.~Mace, ``Serving DNNs like Clockwork: Performance predictability from the bottom up,'' in \emph{Proc. USENIX OSDI}, 2020.
+\bibitem{filterforward} C.~Canel, T.~Kim, G.~Zhou, C.~Li, H.~Lim, D.~G.~Andersen, M.~Kaminsky, and S.~R.~Dulloor, ``Scaling video analytics on constrained edge nodes,'' in \emph{Proc. MLSys}, 2019.
+\end{thebibliography}
+
+\begin{IEEEbiographynophoto}{Lam Quoc Dat}
+Lam Quoc Dat is a researcher at the School of Business and Technology (FSB), FPT University, Ho Chi Minh City, Vietnam. His research spans energy-efficient edge video analytics, online algorithms with predictions, and learning-augmented systems, with a focus on certifiable guarantees for perception sampling under tight energy budgets---characterizing when content-aware scheduling provably helps and when an oblivious schedule is preferable. He can be reached at lamquocdat@gmail.com (ORCID 0009-0004-5432-9343).
+\end{IEEEbiographynophoto}
+
+\end{document}
