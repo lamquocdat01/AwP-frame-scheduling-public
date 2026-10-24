@@ -1,3 +1,5 @@
+> **Superseded (2026-10-24).** This TPDS-era snapshot is superseded by [github.com/lamquocdat01/awp-frame-scheduling](https://github.com/lamquocdat01/awp-frame-scheduling) (version 3, release `v3.0.1-submission`). In v3 the HEDGE-GATE clause of Theorem 3 is corrected, and three result files in this snapshot are **truncated** — `results/metrics_summary.json`, `results/metrics_summary_REAL.json`, `results/corruption_sweep_REAL.csv` — **do not use them**; complete copies (regenerated from source, byte-identical) are in the v3 repository. This repository is kept unchanged for the record.
+
 # Learning-Augmented Scheduling under Hard Activation Budgets — code & reproducibility
 
 Public code and data for the paper *"Learning-Augmented Scheduling under Hard Activation
